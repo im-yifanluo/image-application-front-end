@@ -18,6 +18,7 @@ class _CameraPageState extends State<CameraPage> {
   late List<CameraDescription> _cameras; // List to hold available cameras
   int _selectedCameraIndex = 0; // Track which camera is selected
   bool _isSwitchingCamera = false; // Flag to indicate camera switching
+  String? _cameraError;
 
   @override
   void initState() {
@@ -29,13 +30,25 @@ class _CameraPageState extends State<CameraPage> {
   Future<void> _initializeCamera() async {
     try {
       _cameras = await availableCameras(); // Get available cameras
+      if (!mounted) return;
+      if (_cameras.isEmpty) {
+        setState(() {
+          _cameraError = 'No camera is available on this device.';
+        });
+        return;
+      }
       _onNewCameraSelected(_cameras[_selectedCameraIndex]); // Initialize with the selected camera
     } catch (e) {
       print('Error initializing cameras: $e');
+      if (!mounted) return;
+      setState(() {
+        _cameraError = 'Unable to access the camera.';
+      });
     }
   }
 
   void _onNewCameraSelected(CameraDescription cameraDescription) async {
+    if (!mounted) return;
     setState(() {
       _isSwitchingCamera = true; // Set flag to true when switching camera
     });
@@ -50,15 +63,22 @@ class _CameraPageState extends State<CameraPage> {
 
     try {
       _initializeControllerFuture = _controller!.initialize();
+      if (!mounted) return;
       setState(() {
         _isSwitchingCamera = false; // Reset flag after initializing the camera
       });
     } catch (e) {
       print('Error initializing the selected camera: $e');
+      if (!mounted) return;
+      setState(() {
+        _cameraError = 'Unable to start the camera.';
+        _isSwitchingCamera = false;
+      });
     }
   }
 
   void _switchCamera() {
+    if (_cameras.isEmpty) return;
     setState(() {
       _selectedCameraIndex = (_selectedCameraIndex + 1) % _cameras.length; // Switch between cameras
       _onNewCameraSelected(_cameras[_selectedCameraIndex]); // Update camera
@@ -74,7 +94,18 @@ class _CameraPageState extends State<CameraPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _initializeControllerFuture == null || _isSwitchingCamera
+      body: _cameraError != null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Text(
+                  _cameraError!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 18.0, fontWeight: FontWeight.bold),
+                ),
+              ),
+            )
+          : _initializeControllerFuture == null || _isSwitchingCamera
           ? Container(color: Colors.black) // Display black screen while switching cameras
           : FutureBuilder<void>(
         future: _initializeControllerFuture,
@@ -125,6 +156,7 @@ class _CameraPageState extends State<CameraPage> {
                             try {
                               if (_controller != null && _controller!.value.isInitialized) {
                                 final image = await _controller!.takePicture();
+                                if (!mounted || !context.mounted) return;
                                 setState(() {
                                   _lastCapturedImage = image.path; // Update last captured image
                                 });

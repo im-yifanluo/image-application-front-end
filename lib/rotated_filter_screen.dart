@@ -9,6 +9,8 @@ import 'package:image/image.dart' as img; // Import the image package for rotati
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 
+import './api_config.dart';
+
 class RotatedFilterScreen extends StatefulWidget {
   const RotatedFilterScreen({super.key, required this.imagePath});
 
@@ -32,11 +34,31 @@ class _RotatedFilterScreenState extends State<RotatedFilterScreen> {
     _fetchFilter();
   }
 
+  @override
+  void dispose() {
+    client.close();
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  void _showError() {
+    if (!mounted) return;
+    setState(() {
+      imagePaths["error"] = widget.imagePath;
+    });
+  }
+
   Future<void> _fetchFilter() async {
+    setState(() {
+      data = {};
+      imagePaths = {};
+      _currentPage = 0;
+    });
+
     try {
       final request = http.MultipartRequest(
         'POST',
-        Uri.parse('http://54.193.8.75:5000/get_filters'),
+        apiUri('/get_filters'),
       );
       request.files
           .add(await http.MultipartFile.fromPath('image', widget.imagePath));
@@ -51,18 +73,26 @@ class _RotatedFilterScreenState extends State<RotatedFilterScreen> {
         data = jsonDecode(responseData);
 
         for (String filterName in data.keys) {
+          if (!mounted) return;
           await _applyFilter(filterName, data[filterName]);
         }
+        if (imagePaths.isEmpty) {
+          _showError();
+        }
       } else {
-        print("Failed to process image: ${response.statusCode}");
-        _fetchFilter();
+        final responseBody = await http.Response.fromStream(response);
+        print("Failed to get filters: ${response.statusCode} ${responseBody.body}");
+        _showError();
       }
     } on TimeoutException {
       print("Request timed out.");
-    } on http.ClientException {
-      print("Malformed packet");
+      _showError();
+    } on http.ClientException catch (error) {
+      print("Filter request failed: $error");
+      _showError();
     } catch (e) {
       print("An error occurred: $e");
+      _showError();
     }
   }
 
@@ -71,7 +101,7 @@ class _RotatedFilterScreenState extends State<RotatedFilterScreen> {
     try {
       final request = http.MultipartRequest(
         'POST',
-        Uri.parse('http://54.193.8.75:5000/get_image'),
+        apiUri('/get_image'),
       );
       request.files
           .add(await http.MultipartFile.fromPath('image', widget.imagePath));
@@ -101,12 +131,14 @@ class _RotatedFilterScreenState extends State<RotatedFilterScreen> {
           await file.writeAsBytes(
               img.encodePng(rotatedImage)); // Save the rotated image
 
+          if (!mounted) return;
           setState(() {
             imagePaths[filterName] = file.path;
           });
         }
       } else {
-        print("Image received in bad format");
+        final responseBody = await http.Response.fromStream(response);
+        print("Failed to apply filter: ${response.statusCode} ${responseBody.body}");
       }
     } catch (error) {
       print("An error occurred: $error");
@@ -133,6 +165,7 @@ class _RotatedFilterScreenState extends State<RotatedFilterScreen> {
       // Copy the file instead of renaming
       await file.copy(downloadPath);
 
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text("Image saved to $downloadPath"),
         duration: Duration(seconds: 2),
@@ -162,7 +195,47 @@ class _RotatedFilterScreenState extends State<RotatedFilterScreen> {
         ),
         backgroundColor: Colors.red,
       ),
-      body: data.isNotEmpty
+      body: imagePaths.containsKey('error')
+          ? Center(
+              child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.error,
+                  color: Colors.red,
+                  size: 100,
+                ),
+                SizedBox(height: 10),
+                Text(
+                  "Failed to process image",
+                  style: TextStyle(
+                    color: Colors.red,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                SizedBox(height: 10),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    minimumSize: Size(width * 0.8, 45),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: Text(
+                    "Try Again",
+                    style: TextStyle(
+                      color: Colors.white,
+                    ),
+                  ),
+                  onPressed: () {
+                    _fetchFilter();
+                  },
+                ),
+              ],
+            ))
+          : data.isNotEmpty
           ? Padding(
               padding: EdgeInsets.all(8),
               child: Column(
@@ -183,19 +256,21 @@ class _RotatedFilterScreenState extends State<RotatedFilterScreen> {
                           },
                           itemBuilder: (context, index) {
                             String filterName = data.keys.elementAt(index);
-                            return Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Text(
-                                  filterName,
-                                  style: TextStyle(
-                                    fontSize: 24,
-                                    fontWeight: FontWeight.bold,
+                            return SingleChildScrollView(
+                              padding: EdgeInsets.only(bottom: 16),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    filterName,
+                                    style: TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                    textAlign: TextAlign.center,
                                   ),
-                                  textAlign: TextAlign.center,
-                                ),
-                                SizedBox(height: 10),
-                                if (imagePaths[filterName] != null)
+                                  SizedBox(height: 10),
+                                  if (imagePaths[filterName] != null)
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(15.0),
                                     child: Container(
@@ -206,48 +281,52 @@ class _RotatedFilterScreenState extends State<RotatedFilterScreen> {
                                       ),
                                       child: Image.file(
                                         File(imagePaths[filterName]!),
-                                        height: height * 0.55,
+                                        height: height * 0.42,
                                         fit: BoxFit
                                             .contain, // Ensure entire image is displayed
                                       ),
                                     ),
                                   ),
-                                SizedBox(height: 10),
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(15.0),
-                                  child: Container(
-                                    width: width * 0.9,
-                                    color: Colors.grey[200],
-                                    padding: EdgeInsets.all(8),
+                                  SizedBox(height: 10),
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(15.0),
+                                    child: Container(
+                                      width: width * 0.9,
+                                      constraints: BoxConstraints(maxHeight: height * 0.16),
+                                      color: Colors.grey[200],
+                                      padding: EdgeInsets.all(8),
+                                      child: SingleChildScrollView(
+                                        child: Text(
+                                          data[filterName]['suggestion'],
+                                          style: TextStyle(fontSize: 14),
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(height: 20),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red,
+                                      minimumSize: Size(width * 0.8, 45),
+                                      // Make button wider
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                    ),
                                     child: Text(
-                                      data[filterName]['suggestion'],
-                                      style: TextStyle(fontSize: 14),
-                                      textAlign: TextAlign.center,
+                                      "Save Image",
+                                      style: TextStyle(
+                                        color: Colors
+                                            .white, // Set the text color to white
+                                      ),
                                     ),
+                                    onPressed: () {
+                                      _downloadImage(filterName);
+                                    },
                                   ),
-                                ),
-                                SizedBox(height: 20),
-                                ElevatedButton(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.red,
-                                    minimumSize: Size(width * 0.8, 45),
-                                    // Make button wider
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    "Save Image",
-                                    style: TextStyle(
-                                      color: Colors
-                                          .white, // Set the text color to white
-                                    ),
-                                  ),
-                                  onPressed: () {
-                                    _downloadImage(filterName);
-                                  },
-                                ),
-                              ],
+                                ],
+                              ),
                             );
                           },
                         ),
