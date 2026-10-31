@@ -41,3 +41,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Signing secrets: never commit these. The rules in android/.gitignore
+# only cover the android/ folder, so they are repeated here for the whole repo.
+*.jks
+*.keystore
+*.p12
+key.properties

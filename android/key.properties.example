@@ -1,4 +1,6 @@
+# Copy this file to android/key.properties (git-ignored) and fill it in.
+# Keep the keystore outside this repo and use an absolute path for storeFile.
 storePassword=your_keystore_password
 keyPassword=your_key_password
 keyAlias=your_key_alias
-storeFile=../key.jks
+storeFile=/home/you/keys/photogleam/upload-keystore.jks
